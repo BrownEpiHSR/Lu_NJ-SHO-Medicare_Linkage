@@ -1,0 +1,178 @@
+---
+title: "1. Cohort selection and analysis"
+author: "Fang-Wen Nora Lu"
+date: "2025-10-21"
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(haven)
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r data preparation}
+
+##### data preparation 
+### datasets from Medicare 
+
+# MBSF for base characteristics 
+# for codebooks please Google ResDAC and MBSF and see view the documentation 
+# https://resdac.org/cms-data/files/mbsf-base/data-documentation 
+MBSF_2019 = read_dta(paste0(Medicare, "MBSF_ABCD_2019.dta"))
+MBSF_2019 = MBSF_2019 %>%
+  select(bid_chop_1, age_at_end_ref_yr, bene_death_dt, bene_hi_cvrage_tot_mons, bene_hmo_cvrage_tot_mons, bene_race_cd, sex_ident_cd, rti_race_cd) %>%
+  # id, age at that year end, death date, part A count, count receive A/B benefit through MA, race,  sex, race code modified using the rti algorithm 
+  mutate(FFSEnroll_mons = bene_hi_cvrage_tot_mons - bene_hmo_cvrage_tot_mons, # total part A coverage - medicare advantage coverage 
+         death = if_else(!is.na(bene_death_dt), 1, 0),
+         bene_death_dt = as.Date(bene_death_dt, format = "%Y-%m-%d")) %>% 
+  mutate(FFS_full = ifelse(
+            (FFSEnroll_mons == 12) | 
+            ((death == 1) & (FFSEnroll_mons == month(bene_death_dt))), 1L, 0L) 
+  ) # subset those FFSEnroll = 12 or enrolled until death 
+
+# CCW and OTCC for disease info 
+# https://resdac.org/cms-data/files/mbsf-30-cc/data-documentation 
+CCW_2019 = read_dta(paste0(Medicare, "MBSF_CC_2019.dta"))
+CCW_2019 = CCW_2019 %>% select(bid_chop_1, cataract, cataract_ever, glaucoma, glaucoma_ever, alzh_demen, alzh_demen_ever)
+CCW_2019 = CCW_2019 %>% 
+  mutate(
+    cataract_ever = if_else(!is.na(cataract_ever), 1, 0),
+    glaucoma_ever = if_else(!is.na(glaucoma_ever), 1, 0),
+    alzh_demen_ever = if_else(!is.na(alzh_demen_ever), 1, 0) 
+  )
+
+# OTCC stands for other chronic or potentially disabling conditions
+OTCC_2019 = read_dta(paste0(Medicare, "MBSF_OTCC_2019.dta"))
+OTCC_2019 = OTCC_2019 %>% select(bid_chop_1, fibro_medicare, fibro_medicare_ever, 
+                             hearim_medicare, hearim_medicare_ever, mobimp_medicare, mobimp_medicare_ever,
+                             epilep_medicare, epilep_medicare_ever, schiot_medicare, schiot_medicare_ever,
+                             brainj_medicare, brainj_medicare_ever, spiinj_medicare, spiinj_medicare_ever,
+                             acp_medicare, acp_medicare_ever, mulscl_medicare, mulscl_medicare_ever,
+                             visual_medicare, visual_medicare_ever, musdys_medicare, musdys_medicare_ever)
+OTCC_2019 = OTCC_2019 %>%
+  mutate(
+    fibro_medicare_ever  = if_else(!is.na(fibro_medicare_ever), 1, 0),
+    hearim_medicare_ever = if_else(!is.na(hearim_medicare_ever), 1, 0),
+    mobimp_medicare_ever = if_else(!is.na(mobimp_medicare_ever), 1, 0),
+    epilep_medicare_ever = if_else(!is.na(epilep_medicare_ever), 1, 0),
+    schiot_medicare_ever = if_else(!is.na(schiot_medicare_ever), 1, 0),
+    brainj_medicare_ever = if_else(!is.na(brainj_medicare_ever), 1, 0),
+    spiinj_medicare_ever = if_else(!is.na(spiinj_medicare_ever), 1, 0),
+    acp_medicare_ever    = if_else(!is.na(acp_medicare_ever), 1, 0),
+    mulscl_medicare_ever = if_else(!is.na(mulscl_medicare_ever), 1, 0),
+    visual_medicare_ever = if_else(!is.na(visual_medicare_ever), 1, 0),
+    musdys_medicare_ever = if_else(!is.na(musdys_medicare_ever), 1, 0)
+  )
+
+### datasets from NJ-SHO 
+license =  read_sas(paste0(NJ, "license_20241023.sas7bdat"))
+license = license %>%
+  select(bid, fullperiod, full_start, full_end, full_endmissing, ageflr_fullstart) %>%
+  # fullperiod: a binary indicator indicating whether we have the full license period (full_start & full_end)
+  # ageflr_fullstart: age at the start of the full license period (floored)
+  mutate(full_start = as.Date(full_start),
+         full_end = as.Date(full_end)) %>% 
+  mutate(full_2019 = ifelse((full_start <= as.Date("2019-01-01")) & (full_end >= as.Date("2019-12-31")), 1, 0)
+  ) # a binary indicator indicating whether the individual has license for the whole year in 2019 
+
+driver_crash =  read_sas(paste0(NJ, "driver0419_20241023.sas7bdat"))
+driver_crash = driver_crash %>% select(bid, crashdate, year) 
+driver_crash_ever = driver_crash %>% group_by(bid) %>% summarise(crashever = as.integer(any(!is.na(crashdate))))
+driver_crash_2019 = driver_crash %>% filter(year == 2019) %>%
+  group_by(bid) %>% summarise(crashever_2019 = as.integer(any(!is.na(crashdate))))
+  # crashever and crashever_2019 are binary indicator variables 
+
+citation =  read_sas(paste0(NJ, "aoc_20241023.sas7bdat"))
+citation = citation %>% select(bid, eventdate, citationcode) %>% 
+  mutate(eventdate = as.Date(eventdate))
+citation_2019 <- citation %>%
+  filter(format(eventdate, "%Y") == "2019") %>% 
+  group_by(bid) %>% summarise(citationever_2019 = as.integer(any(!is.na(eventdate))))
+
+### match infomation 
+match  =  read_sas(paste0(NJ, "matchdetail_20241023.sas7bdat"))
+match = match %>%
+  select(bid, age_info, acceptcat5)
+
+##### combining datasets 
+df_combine = MBSF_2019 %>% 
+  left_join(match, by = c("bid_chop_1" = "bid")) %>%
+  left_join(CCW_2019, by = "bid_chop_1") %>%
+  left_join(OTCC_2019, by = "bid_chop_1") %>%
+  left_join(license, by = c("bid_chop_1" = "bid")) %>%
+  left_join(driver_crash_2019, by = c("bid_chop_1" = "bid")) %>%
+  left_join(citation_2019, by = c("bid_chop_1" = "bid")) 
+
+df_combine = df_combine %>% # n = 1305076 
+  filter(FFS_full == 1) %>% # n = 1213494; subset to individuals with FFS enrollment all year or until their death in 2019
+  filter(acceptcat5 == 1) %>% # n = 1198567; if we don't subset to any specific match category, then it will based on all linked individuals 
+  # acceptcat5 is the category our team agreed on that best suitable for our needs, but future researchers can choose different categories based on the definition of each category 
+  filter(age_at_end_ref_yr >= 65) # n = 1198381 # exclude indivduals <65 = 186, 0.0155% out of the previous 1198567 individuals, get a subset to enrollment to Medicare due to age 
+
+```
+
+
+```{r calculation}
+
+# data exploration 
+df_na = df_combine %>%
+  summarise(across(everything(), ~ sum(is.na(.))))
+df_na
+
+df_combine = df_combine %>% 
+  rename(age = age_at_end_ref_yr) %>% 
+  mutate(age_group = case_when(
+    age < 65 ~ "<65",
+    age >= 65 & age <= 69 ~ "65-69",
+    age >= 70 & age <= 74 ~ "70-74",
+    age >= 75 & age <= 79 ~ "75-79",
+    age >= 80 & age <= 84 ~ "80-84",
+    age >= 85 ~ "85+",
+    TRUE ~ NA_character_
+  )) # there are no decimals for this variables
+
+quantile(df_combine$age, probs = c(0.25, 0.5, 0.75), na.rm = T)
+
+# count and proportion for var of interest  
+get_counts = function(df, var) {
+  df %>% 
+    count({{var}}, name = "n", drop = F) %>%
+    mutate(proportion = round(n/sum(n), 4)) %>%
+    select(-drop)
+}
+get_counts(df_combine, age_group)
+get_counts(df_combine, sex_ident_cd) # 2 = female 
+get_counts(df_combine, rti_race_cd)
+# 0 = unknown, 1 = non-hispanic white, 2 = african-american, 3 = other, 4 = asian/pacific islander, 5 = hispanic, 6 = american indian/alaska native 
+get_counts(df_combine, death)
+get_counts(df_combine, crashever_2019) # the NA = no crash in that year 
+get_counts(df_combine, citationever_2019)
+get_counts(df_combine, full_2019)
+# the NAs for this variable are those not in the license dataset but in the MBSF_2019 dataset 
+
+vars = c("age_group", "sex_ident_cd", "rti_race_cd", "death",
+          "crashever_2019", "citationever_2019", "full_2019")
+result = map_dfr(
+  vars, 
+  ~ get_counts(df_combine, !!sym(.x)) %>%
+    mutate(variable = .x), 
+  .id = "group"
+)
+result
+
+vars = c("cataract_ever", "glaucoma_ever", "alzh_demen_ever", "fibro_medicare_ever",
+          "hearim_medicare_ever", "mobimp_medicare_ever", "epilep_medicare_ever",
+          "schiot_medicare_ever", "brainj_medicare_ever", "spiinj_medicare_ever",
+          "acp_medicare_ever", "mulscl_medicare_ever", "visual_medicare_ever", "musdys_medicare_ever")
+result_com = map_dfr(
+  vars, 
+  ~ get_counts(df_combine, !!sym(.x)) %>%
+    mutate(variable = .x), 
+  .id = "group"
+)
+result_com
+```
