@@ -6,7 +6,7 @@ This repository contains data documentation and code for the analysis in the man
 - `LICENSE` - The license under which this repository is shared.
 - `README.md` - This file, providing an overview of the repository.
 ## Data Documentation
-- `data_documentation.xlsx` - Describes the data sources and key variables.
+- `data_documentation.xlsx` - Describes the data sources and key variables used in the descriptive analysis.
 ## Code
 The `code/` directory contains the following programs:
 - `1. Cohort selection and analysis.rmd` - This program demonstrates how to link datasets and describes the characteristics of linked individuals in 2019.
